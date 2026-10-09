@@ -21,19 +21,26 @@ export function normalizeBaseUrl(baseUrl: string): string {
   return trimmed;
 }
 
+const REQUEST_TIMEOUT_MS = 15000;
+
 async function request<T>(baseUrl: string, apiKey: string, path: string): Promise<T> {
   if (!apiKey.trim()) {
     throw new ApiError(UI.common.noApiKey);
   }
   const endpoint = `${normalizeBaseUrl(baseUrl)}${path}`;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   let response: Response;
   try {
     response = await fetch(endpoint, {
       method: 'GET',
       headers: {Authorization: `Bearer ${apiKey.trim()}`},
+      signal: controller.signal,
     });
   } catch {
-    throw new ApiError(UI.common.network);
+    throw new ApiError(controller.signal.aborted ? UI.common.timeout : UI.common.network);
+  } finally {
+    clearTimeout(timer);
   }
   if (!response.ok) {
     throw new ApiError(
@@ -60,8 +67,10 @@ export async function loadModels(baseUrl: string, apiKey: string): Promise<strin
     .sort((first, second) => first.localeCompare(second));
 }
 
-export async function checkConnection(baseUrl: string, apiKey: string): Promise<void> {
-  await request(baseUrl, apiKey, '/models');
+/** Resolves with the number of models the provider exposes. */
+export async function checkConnection(baseUrl: string, apiKey: string): Promise<number> {
+  const models = await loadModels(baseUrl, apiKey);
+  return models.length;
 }
 
 export async function createExplanation(args: {

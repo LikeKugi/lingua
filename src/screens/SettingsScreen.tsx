@@ -1,19 +1,36 @@
 import React, {useEffect, useState} from 'react';
 import {
   ActivityIndicator,
-  Alert,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
-import {checkConnection, loadModels} from '../api/client';
+import {ApiError, checkConnection, loadModels} from '../api/client';
 import {LANGUAGES, languageLabel} from '../constants/languages';
 import {ChoiceSheet, Field, PageHeader, SecondaryButton, SectionLabel, Card} from '../components/Interface';
 import {UI} from '../i18n/strings';
-import {useSettingsStore} from '../store/settingsStore';
+import {notify} from '../lib/notify';
+import {isApiKeyPersisted, useSettingsStore} from '../store/settingsStore';
 import {colors, common} from '../theme';
+
+type ConnectionState =
+  | {status: 'idle'}
+  | {status: 'checking'}
+  | {status: 'success'; detail: string; checkedAt: number}
+  | {status: 'error'; detail: string; checkedAt: number};
+
+function describeError(error: unknown): string {
+  if (error instanceof ApiError) {
+    return error.status ? `${error.message} (${UI.common.httpStatus} ${error.status})` : error.message;
+  }
+  return error instanceof Error ? error.message : UI.common.genericApi;
+}
+
+function formatTime(timestamp: number): string {
+  return new Date(timestamp).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit', second: '2-digit'});
+}
 
 export function SettingsScreen() {
   const {
@@ -33,10 +50,9 @@ export function SettingsScreen() {
   const [modelSheet, setModelSheet] = useState(false);
   const [languageSheet, setLanguageSheet] = useState(false);
   const [loadingModels, setLoadingModels] = useState(false);
-  const [checking, setChecking] = useState(false);
   const [keySaved, setKeySaved] = useState(Boolean(apiKey));
-  const [connectionMessage, setConnectionMessage] = useState('');
-  const [connectionGood, setConnectionGood] = useState(false);
+  const [connection, setConnection] = useState<ConnectionState>({status: 'idle'});
+  const checking = connection.status === 'checking';
 
   useEffect(() => {
     setApiKeyDraft(apiKey);
@@ -47,53 +63,68 @@ export function SettingsScreen() {
     try {
       await setApiKey(apiKeyDraft);
       setKeySaved(true);
-      setConnectionMessage('');
-      Alert.alert(UI.settings.apiKey, UI.settings.keySaved);
+      notify(UI.settings.apiKey, UI.settings.keySaved);
     } catch (error) {
       const message = error instanceof Error ? error.message : UI.common.error;
       setKeySaved(false);
-      Alert.alert(UI.common.error, message);
+      notify(UI.common.error, message);
+    }
+  };
+
+  // Persist a key the user typed but did not save explicitly, once it is known to work.
+  const saveDraftKeyIfNeeded = async (): Promise<boolean> => {
+    if (keySaved || apiKeyDraft.trim() === apiKey) {
+      return true;
+    }
+    try {
+      await setApiKey(apiKeyDraft);
+      setKeySaved(true);
+      return true;
+    } catch (error) {
+      console.warn('Could not save the API key after a successful check.', error);
+      return false;
     }
   };
 
   const fetchModels = async () => {
-    setConnectionMessage('');
     setLoadingModels(true);
     try {
-      const result = await loadModels(baseUrl, apiKey);
+      const result = await loadModels(baseUrl, apiKeyDraft);
       setModels(result);
-      setConnectionGood(true);
-      setConnectionMessage(`${UI.settings.modelsLoaded}: ${result.length}`);
+      const saved = await saveDraftKeyIfNeeded();
+      setConnection({
+        status: 'success',
+        detail: saved ? `${UI.settings.modelsLoaded}: ${result.length}` : UI.settings.keySaveFailed,
+        checkedAt: Date.now(),
+      });
       if (result.length === 0) {
-        Alert.alert(UI.common.error, UI.settings.noModels);
+        notify(UI.common.error, UI.settings.noModels);
       } else {
         setModelSheet(true);
       }
     } catch (error) {
-      const message = error instanceof Error ? error.message : UI.common.genericApi;
-      setConnectionGood(false);
-      setConnectionMessage(message);
-      Alert.alert(UI.common.error, message);
+      const detail = describeError(error);
+      setConnection({status: 'error', detail, checkedAt: Date.now()});
+      notify(UI.settings.notConnected, detail);
     } finally {
       setLoadingModels(false);
     }
   };
 
   const testConnection = async () => {
-    setConnectionMessage('');
-    setChecking(true);
+    setConnection({status: 'checking'});
     try {
-      await checkConnection(baseUrl, apiKey);
-      setConnectionGood(true);
-      setConnectionMessage(UI.settings.connected);
-      Alert.alert(UI.settings.checkConnection, UI.settings.connected);
+      const modelCount = await checkConnection(baseUrl, apiKeyDraft);
+      const saved = await saveDraftKeyIfNeeded();
+      setConnection({
+        status: 'success',
+        detail: saved ? `${UI.settings.modelsLoaded}: ${modelCount}` : UI.settings.keySaveFailed,
+        checkedAt: Date.now(),
+      });
     } catch (error) {
-      const message = error instanceof Error ? error.message : UI.common.genericApi;
-      setConnectionGood(false);
-      setConnectionMessage(message);
-      Alert.alert(UI.common.error, message);
-    } finally {
-      setChecking(false);
+      const detail = describeError(error);
+      setConnection({status: 'error', detail, checkedAt: Date.now()});
+      notify(UI.settings.notConnected, detail);
     }
   };
 
@@ -114,12 +145,14 @@ export function SettingsScreen() {
             onChangeText={value => {
               setApiKeyDraft(value);
               setKeySaved(false);
+              setConnection({status: 'idle'});
             }}
             placeholder={UI.settings.apiKeyPlaceholder}
             secure
             input={{autoCapitalize: 'none', autoCorrect: false}}
             right={keySaved ? <Text style={styles.secureLabel}>●  {UI.settings.keySaved}</Text> : null}
           />
+          {!isApiKeyPersisted ? <Text style={styles.webNotice}>{UI.settings.webKeyNotice}</Text> : null}
           <View style={styles.saveKeyButton}>
             <SecondaryButton
               title={UI.settings.saveKey}
@@ -131,7 +164,10 @@ export function SettingsScreen() {
           <Field
             label={UI.settings.baseUrl}
             value={baseUrl}
-            onChangeText={setBaseUrl}
+            onChangeText={value => {
+              setBaseUrl(value);
+              setConnection({status: 'idle'});
+            }}
             placeholder="https://api.openai.com/v1"
             input={{keyboardType: 'url', autoCapitalize: 'none', autoCorrect: false}}
           />
@@ -156,15 +192,36 @@ export function SettingsScreen() {
             <Pressable
               onPress={testConnection}
               disabled={checking}
+              accessibilityRole="button"
               style={({pressed}) => [styles.modelButton, pressed && styles.modelButtonPressed]}>
               {checking ? <ActivityIndicator size="small" color={colors.forest} /> : <Text style={styles.actionGlyph}>⌁</Text>}
               <Text style={styles.modelButtonText}>{UI.settings.checkConnection}</Text>
             </Pressable>
           </View>
-          {connectionMessage ? (
-            <View style={[styles.connectionStatus, !connectionGood && styles.connectionError]}>
-              <View style={[styles.connectionDot, !connectionGood && styles.connectionDotError]} />
-              <Text style={[styles.connectionText, !connectionGood && styles.connectionTextError]}>{connectionMessage}</Text>
+          {connection.status === 'checking' ? (
+            <View accessibilityLiveRegion="polite" style={[styles.connectionStatus, styles.connectionChecking]}>
+              <ActivityIndicator size="small" color={colors.forest} />
+              <Text style={styles.connectionTitle}>{UI.settings.checking}</Text>
+            </View>
+          ) : null}
+          {connection.status === 'success' || connection.status === 'error' ? (
+            <View
+              accessibilityLiveRegion="polite"
+              style={[styles.connectionStatus, connection.status === 'success' ? styles.connectionSuccess : styles.connectionError]}>
+              <View style={[styles.connectionBadge, connection.status === 'error' && styles.connectionBadgeError]}>
+                <Text style={styles.connectionBadgeText}>{connection.status === 'success' ? '✓' : '✕'}</Text>
+              </View>
+              <View style={styles.connectionBody}>
+                <Text style={[styles.connectionTitle, connection.status === 'error' && styles.connectionTextError]}>
+                  {connection.status === 'success' ? UI.settings.connected : UI.settings.notConnected}
+                </Text>
+                <Text style={[styles.connectionText, connection.status === 'error' && styles.connectionTextError]}>
+                  {connection.detail}
+                </Text>
+                <Text style={styles.connectionTime}>
+                  {UI.settings.checkedAt} {formatTime(connection.checkedAt)}
+                </Text>
+              </View>
             </View>
           ) : null}
         </Card>
@@ -237,12 +294,19 @@ const styles = StyleSheet.create({
   modelButtonPressed: {backgroundColor: '#F1F0E8'},
   actionGlyph: {color: colors.forest, fontSize: 15, fontWeight: '800'},
   modelButtonText: {fontSize: 10, fontWeight: '700', color: colors.ink, flexShrink: 1},
-  connectionStatus: {flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: 12},
-  connectionError: {},
-  connectionDot: {width: 6, height: 6, borderRadius: 3, backgroundColor: colors.forest},
-  connectionDotError: {backgroundColor: colors.coral},
-  connectionText: {color: colors.forest, fontSize: 11, flex: 1},
+  webNotice: {fontSize: 11, color: colors.muted, lineHeight: 16, marginTop: 8},
+  connectionStatus: {flexDirection: 'row', alignItems: 'flex-start', gap: 10, marginTop: 12, padding: 12, borderRadius: 12, borderWidth: 1},
+  connectionChecking: {alignItems: 'center', borderColor: colors.line, backgroundColor: '#F7F6F0'},
+  connectionSuccess: {borderColor: colors.forest, backgroundColor: colors.forestSoft},
+  connectionError: {borderColor: colors.coral, backgroundColor: colors.coralSoft},
+  connectionBadge: {width: 24, height: 24, borderRadius: 12, backgroundColor: colors.forest, alignItems: 'center', justifyContent: 'center'},
+  connectionBadgeError: {backgroundColor: colors.coral},
+  connectionBadgeText: {color: colors.surface, fontSize: 13, fontWeight: '900'},
+  connectionBody: {flex: 1, gap: 3},
+  connectionTitle: {color: colors.forest, fontSize: 13, fontWeight: '800'},
+  connectionText: {color: colors.forest, fontSize: 12, lineHeight: 17},
   connectionTextError: {color: colors.coral},
+  connectionTime: {color: colors.muted, fontSize: 10},
   preferenceSection: {marginTop: 25},
   languageSelect: {minHeight: 69, borderRadius: 17, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.surface, paddingHorizontal: 14, flexDirection: 'row', alignItems: 'center'},
   languageGlyph: {width: 39, height: 39, borderRadius: 13, backgroundColor: colors.lime, alignItems: 'center', justifyContent: 'center'},

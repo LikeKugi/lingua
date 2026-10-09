@@ -1,3 +1,4 @@
+import {Platform} from 'react-native';
 import {create} from 'zustand';
 import {createJSONStorage, persist} from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -7,6 +8,8 @@ import {BASE_SYSTEM_PROMPT} from '../constants/defaultPrompts';
 import {LANGUAGES} from '../constants/languages';
 
 const API_KEY_STORAGE_KEY = 'apiKey';
+// expo-secure-store has no web implementation; on web the key lives in memory for the session only.
+export const isApiKeyPersisted = Platform.OS !== 'web';
 const deviceLanguage = getLocales()[0]?.languageCode;
 const initialResponseLanguage = LANGUAGES.some(language => language.code === deviceLanguage)
   ? deviceLanguage ?? 'ru'
@@ -39,6 +42,9 @@ export const useSettingsStore = create<SettingsState>()(
       responseLanguage: initialResponseLanguage,
       systemPrompt: BASE_SYSTEM_PROMPT,
       hydrateApiKey: async () => {
+        if (!isApiKeyPersisted) {
+          return;
+        }
         try {
           const apiKey = await SecureStore.getItemAsync(API_KEY_STORAGE_KEY);
           set({apiKey: apiKey ?? ''});
@@ -48,6 +54,10 @@ export const useSettingsStore = create<SettingsState>()(
       },
       setApiKey: async value => {
         const trimmed = value.trim();
+        if (!isApiKeyPersisted) {
+          set({apiKey: trimmed});
+          return;
+        }
         if (trimmed.length === 0) {
           await SecureStore.deleteItemAsync(API_KEY_STORAGE_KEY);
         } else {

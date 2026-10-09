@@ -1,4 +1,22 @@
 {
-  "name": "explain_translate",
-  "displayName": "explain_translate"
+  "expo": {
+    "name": "Лингва",
+    "slug": "lingua-error-explainer",
+    "scheme": "lingua",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "plugins": [
+      "expo-router",
+      "expo-secure-store"
+    ],
+    "android": {
+      "package": "com.lingua.error_explainer"
+    },
+    "ios": {
+      "bundleIdentifier": "com.lingua.errorexplainer",
+      "supportsTablet": true
+    }
+  }
 }

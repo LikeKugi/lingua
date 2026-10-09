@@ -12,7 +12,7 @@ import {LANGUAGES, languageLabel} from '../constants/languages';
 import {ChoiceSheet, Field, PageHeader, SecondaryButton, SectionLabel, Card} from '../components/Interface';
 import {UI} from '../i18n/strings';
 import {notify} from '../lib/notify';
-import {isApiKeyPersisted, useSettingsStore} from '../store/settingsStore';
+import {useSettingsStore} from '../store/settingsStore';
 import {colors, common} from '../theme';
 
 type ConnectionState =
@@ -152,7 +152,6 @@ export function SettingsScreen() {
             input={{autoCapitalize: 'none', autoCorrect: false}}
             right={keySaved ? <Text style={styles.secureLabel}>●  {UI.settings.keySaved}</Text> : null}
           />
-          {!isApiKeyPersisted ? <Text style={styles.webNotice}>{UI.settings.webKeyNotice}</Text> : null}
           <View style={styles.saveKeyButton}>
             <SecondaryButton
               title={UI.settings.saveKey}
@@ -294,7 +293,6 @@ const styles = StyleSheet.create({
   modelButtonPressed: {backgroundColor: '#F1F0E8'},
   actionGlyph: {color: colors.forest, fontSize: 15, fontWeight: '800'},
   modelButtonText: {fontSize: 10, fontWeight: '700', color: colors.ink, flexShrink: 1},
-  webNotice: {fontSize: 11, color: colors.muted, lineHeight: 16, marginTop: 8},
   connectionStatus: {flexDirection: 'row', alignItems: 'flex-start', gap: 10, marginTop: 12, padding: 12, borderRadius: 12, borderWidth: 1},
   connectionChecking: {alignItems: 'center', borderColor: colors.line, backgroundColor: '#F7F6F0'},
   connectionSuccess: {borderColor: colors.forest, backgroundColor: colors.forestSoft},

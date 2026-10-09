@@ -8,8 +8,22 @@ import {BASE_SYSTEM_PROMPT} from '../constants/defaultPrompts';
 import {LANGUAGES} from '../constants/languages';
 
 const API_KEY_STORAGE_KEY = 'apiKey';
-// expo-secure-store has no web implementation; on web the key lives in memory for the session only.
-export const isApiKeyPersisted = Platform.OS !== 'web';
+
+// expo-secure-store has no web implementation; on web the key is kept in plain localStorage (not secure).
+const apiKeyStorage = {
+  get: async (): Promise<string | null> =>
+    Platform.OS === 'web'
+      ? window.localStorage.getItem(API_KEY_STORAGE_KEY)
+      : SecureStore.getItemAsync(API_KEY_STORAGE_KEY),
+  set: async (value: string): Promise<void> =>
+    Platform.OS === 'web'
+      ? window.localStorage.setItem(API_KEY_STORAGE_KEY, value)
+      : SecureStore.setItemAsync(API_KEY_STORAGE_KEY, value),
+  remove: async (): Promise<void> =>
+    Platform.OS === 'web'
+      ? window.localStorage.removeItem(API_KEY_STORAGE_KEY)
+      : SecureStore.deleteItemAsync(API_KEY_STORAGE_KEY),
+};
 const deviceLanguage = getLocales()[0]?.languageCode;
 const initialResponseLanguage = LANGUAGES.some(language => language.code === deviceLanguage)
   ? deviceLanguage ?? 'ru'
@@ -42,26 +56,19 @@ export const useSettingsStore = create<SettingsState>()(
       responseLanguage: initialResponseLanguage,
       systemPrompt: BASE_SYSTEM_PROMPT,
       hydrateApiKey: async () => {
-        if (!isApiKeyPersisted) {
-          return;
-        }
         try {
-          const apiKey = await SecureStore.getItemAsync(API_KEY_STORAGE_KEY);
+          const apiKey = await apiKeyStorage.get();
           set({apiKey: apiKey ?? ''});
         } catch (error) {
-          console.warn('Could not read the API key from secure storage.', error);
+          console.warn('Could not read the API key from storage.', error);
         }
       },
       setApiKey: async value => {
         const trimmed = value.trim();
-        if (!isApiKeyPersisted) {
-          set({apiKey: trimmed});
-          return;
-        }
         if (trimmed.length === 0) {
-          await SecureStore.deleteItemAsync(API_KEY_STORAGE_KEY);
+          await apiKeyStorage.remove();
         } else {
-          await SecureStore.setItemAsync(API_KEY_STORAGE_KEY, trimmed);
+          await apiKeyStorage.set(trimmed);
         }
         set({apiKey: trimmed});
       },

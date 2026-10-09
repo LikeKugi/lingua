@@ -49,6 +49,18 @@ export function ExplainScreen({onOpenSettings}: {onOpenSettings: () => void}) {
     correctAnswer.trim().length > 0 &&
     Boolean(apiKey.trim() && baseUrl.trim() && model.trim());
 
+  const changeTaskType = (type: TaskType) => {
+    if (type === taskType) {
+      return;
+    }
+    setTaskType(type);
+    setWords(['', '']);
+    setSentence('');
+    setUserAnswer('');
+    setCorrectAnswer('');
+    setError('');
+  };
+
   const submit = async () => {
     setError('');
     setResponse('');
@@ -124,7 +136,7 @@ export function ExplainScreen({onOpenSettings}: {onOpenSettings: () => void}) {
             return (
               <Pressable
                 key={type}
-                onPress={() => setTaskType(type)}
+                onPress={() => changeTaskType(type)}
                 style={[styles.segmentItem, selected && styles.segmentSelected]}>
                 <Text style={[styles.segmentText, selected && styles.segmentSelectedText]}>
                   {type === 'words' ? UI.explain.words : UI.explain.sentence}
